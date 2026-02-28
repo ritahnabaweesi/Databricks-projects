@@ -1,0 +1,100 @@
+-- franchise ratings
+SELECT 
+  r.franchiseID AS franchiseID,
+  f.name as franchise,
+  TRY_CAST(regexp_extract(r.review, '([1-5])/5', 1) AS INT) AS rating_out_of_5,
+  CAST(r.review_date AS DATE) AS review_date_only
+FROM samples.bakehouse.media_customer_reviews r
+JOIN samples.bakehouse.sales_franchises f
+ON r.franchiseID = f.franchiseID
+WHERE TRY_CAST(regexp_extract(review, '([1-5])/5', 1) AS INT) IS NOT NULL
+
+-- Number of reviews
+SELECT
+r.franchiseID AS franchiseID,
+f.name as franchise,
+CAST(r.review_date AS DATE) AS review_date_only,
+COUNT(r.review) as no_of_reviews
+FROM samples.bakehouse.media_customer_reviews r 
+JOIN samples.bakehouse.sales_franchises f 
+ON r.franchiseID = f.franchiseID
+GROUP BY r.franchiseID,franchise, review_date_only
+
+-- sentiment analysis
+SELECT 
+  r.franchiseID AS franchiseID,
+  f.name AS franchise,
+  f.country AS country,
+  CAST(r.review_date AS DATE) AS review_date_only,
+  ai_analyze_sentiment(r.review) AS sentiment
+FROM samples.bakehouse.media_customer_reviews r
+JOIN samples.bakehouse.sales_franchises f
+ON r.franchiseID = f.franchiseID
+WHERE r.review IS NOT NULL 
+
+-- Geographical presence
+SELECT 
+country,
+count(name) as no_of_franchises
+FROM samples.bakehouse.sales_franchises
+GROUP BY country
+ORDER BY no_of_franchises DESC
+
+-- Franchise product sales
+SELECT 
+t.franchiseID AS franchiseID,
+f.name AS franchise,
+f.country AS country,
+t.product AS product,
+COUNT(t.product) AS product_sold,
+SUM(t.totalPrice) as revenue
+FROM samples.bakehouse.sales_transactions t
+JOIN samples.bakehouse.sales_franchises f
+ON t.franchiseID = f.franchiseID
+GROUP BY t.franchiseID, f.name, country, product
+ORDER BY COUNT(t.product)
+
+-- Summarize negative review pain points for each product
+WITH negative_reviews AS (
+  SELECT review,
+         franchiseID,
+         CASE
+           WHEN review LIKE '%oatmeal%' THEN 'Outback Oatmeal'
+           WHEN review LIKE '%biscotti%' THEN 'Austin Almond Biscotti'
+           WHEN review LIKE '%orchard%' THEN 'Orchard Oasis'
+           WHEN review LIKE '%ginger%' THEN 'Golden Gate Ginger'
+           WHEN review LIKE '%pearl%' THEN 'Pearly Pies'
+           WHEN review LIKE '%tokyo%' THEN 'Tokyo Tidbits'
+           WHEN review LIKE '%tidbits%' THEN 'Tokyo Tidbits'
+           ELSE 'Other'
+         END AS product,
+         CASE
+           WHEN review LIKE '%dry%' THEN 'Dry texture'
+           WHEN review LIKE '%crumbly%' THEN 'Crumbly texture'
+           WHEN review LIKE '%hard%' THEN 'Too hard'
+           WHEN review LIKE '%lack%' THEN 'Lack of flavor'
+           WHEN review LIKE '%disappoint%' THEN 'Disappointing'
+           WHEN review LIKE '%too sweet%' THEN 'Too sweet'
+           ELSE 'Other issue'
+         END AS theme
+  FROM samples.bakehouse.media_customer_reviews
+  WHERE review LIKE '%dry%' 
+     OR review LIKE '%crumbly%' 
+     OR review LIKE '%hard%'
+     OR review LIKE '%lack%'
+     OR review LIKE '%disappoint%'
+     OR review LIKE '%too sweet%'
+)
+SELECT 
+  product, 
+  theme, 
+  country, 
+  COUNT(*) AS occurrences
+FROM negative_reviews
+LEFT JOIN samples.bakehouse.sales_franchises f
+  ON negative_reviews.franchiseID = f.franchiseID
+WHERE product != 'Other'
+GROUP BY product, theme, country
+HAVING COUNT(*) >= 5
+ORDER BY occurrences DESC, product
+LIMIT 1000
